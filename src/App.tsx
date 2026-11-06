@@ -16,12 +16,67 @@ import {
   User,
   Zap,
   ShieldCheck,
+  Settings,
+  X,
 } from 'lucide-react';
-import { LeadProfile, Message, PresetScenario } from './types';
+import { LeadProfile, Message, PresetScenario, QualificationSettings } from './types';
 import {
+  applyQualificationSettings,
+  DEFAULT_QUALIFICATION_SETTINGS,
   INITIAL_LEAD_PROFILE,
   analyzeConversationAndGenerateReply,
 } from './services/aiEngine';
+
+const SETTINGS_STORAGE_KEY = 'flyrank-qualification-settings';
+
+function readQualificationSettings(): QualificationSettings {
+  try {
+    const savedSettings = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
+
+    if (!savedSettings) {
+      return DEFAULT_QUALIFICATION_SETTINGS;
+    }
+
+    const parsed: unknown = JSON.parse(savedSettings);
+
+    if (!parsed || typeof parsed !== "object") {
+      return DEFAULT_QUALIFICATION_SETTINGS;
+    }
+
+    const settings = parsed as Partial<QualificationSettings>;
+
+    const validThresholds =
+      Number.isInteger(settings.mqlThreshold) &&
+      Number.isInteger(settings.sqlThreshold) &&
+      settings.mqlThreshold! >= 0 &&
+      settings.sqlThreshold! <= 100 &&
+      settings.mqlThreshold! < settings.sqlThreshold!;
+
+    const validBudget = [0, 500, 1000, 2500, 5000, 10000].includes(
+      Number(settings.minimumMonthlyBudget)
+    );
+
+    const destination = settings.sqlRoutingDestination?.trim();
+
+    if (
+      !validThresholds ||
+      !validBudget ||
+      !destination ||
+      destination.length > 80
+    ) {
+      return DEFAULT_QUALIFICATION_SETTINGS;
+    }
+
+    return {
+      mqlThreshold: settings.mqlThreshold!,
+      sqlThreshold: settings.sqlThreshold!,
+      minimumMonthlyBudget: Number(settings.minimumMonthlyBudget),
+      sqlRoutingDestination: destination,
+    };
+  } catch {
+    return DEFAULT_QUALIFICATION_SETTINGS;
+  }
+}
 
 const PRESET_SCENARIOS: PresetScenario[] = [
   {
@@ -73,6 +128,11 @@ export function App() {
   const [isTyping, setIsTyping] = useState(false);
   const [profile, setProfile] = useState<LeadProfile>(INITIAL_LEAD_PROFILE);
   const [showJsonModal, setShowJsonModal] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settings, setSettings] = useState<QualificationSettings>(readQualificationSettings);
+  const [settingsDraft, setSettingsDraft] =
+    useState<QualificationSettings>(DEFAULT_QUALIFICATION_SETTINGS);
+  const [settingsError, setSettingsError] = useState('');
   const [copiedNotice, setCopiedNotice] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement | null>(null);
@@ -80,6 +140,17 @@ export function App() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isTyping]);
+
+  useEffect(() => {
+    if (!showSettings) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setShowSettings(false);
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [showSettings]);
 
   const handleSendMessage = (textToSend?: string) => {
     const trimmed = (textToSend ?? input).trim();
@@ -101,7 +172,8 @@ export function App() {
       const { updatedProfile, reply } = analyzeConversationAndGenerateReply(
         trimmed,
         profile,
-        nextHistory
+        nextHistory,
+        settings
       );
       setProfile(updatedProfile);
       setMessages((prev) => [
@@ -135,7 +207,12 @@ export function App() {
         text: msgText,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       });
-      const result = analyzeConversationAndGenerateReply(msgText, tempProfile, builtMessages);
+      const result = analyzeConversationAndGenerateReply(
+        msgText,
+        tempProfile,
+        builtMessages,
+        settings
+      );
       tempProfile = result.updatedProfile;
       builtMessages.push({
         id: `sim-ai-${idx}`,
@@ -161,6 +238,40 @@ export function App() {
     ]);
   };
 
+  const openSettings = () => {
+    setSettingsDraft({ ...settings });
+    setSettingsError('');
+    setShowSettings(true);
+  };
+
+  const handleSaveSettings = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const updatedSettings = {
+      ...settingsDraft,
+      sqlRoutingDestination: settingsDraft.sqlRoutingDestination.trim(),
+    };
+
+    if (updatedSettings.mqlThreshold >= updatedSettings.sqlThreshold) {
+      setSettingsError('The SQL threshold must be higher than the MQL threshold.');
+      return;
+    }
+    if (!updatedSettings.sqlRoutingDestination) {
+      setSettingsError('Enter a destination for SQL leads.');
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(updatedSettings));
+    } catch {
+      setSettingsError('Unable to save preferences in this browser. Check storage availability and try again.');
+      return;
+    }
+
+    setSettings(updatedSettings);
+    setProfile((currentProfile) => applyQualificationSettings(currentProfile, updatedSettings));
+    setShowSettings(false);
+  };
+
   const handleExportJson = () => {
     const payload = JSON.stringify(
       {
@@ -182,6 +293,12 @@ export function App() {
       : profile.status === 'Warm (MQL)'
       ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
       : 'bg-slate-700/60 text-slate-300 border-slate-600';
+  const scoreColor =
+    profile.totalScore >= settings.sqlThreshold
+      ? 'bg-emerald-500'
+      : profile.totalScore >= settings.mqlThreshold
+      ? 'bg-amber-400'
+      : 'bg-indigo-500';
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
@@ -207,6 +324,14 @@ export function App() {
           </div>
 
           <div className="flex items-center gap-2.5">
+            <button
+              onClick={openSettings}
+              aria-label="Open qualification settings"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition cursor-pointer"
+            >
+              <Settings className="w-4 h-4 text-indigo-400" />
+              Settings
+            </button>
             <button
               onClick={() => setShowJsonModal(!showJsonModal)}
               aria-label="Toggle CRM JSON Payload View"
@@ -370,13 +495,7 @@ export function App() {
 
             <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden mb-4">
               <div
-                className={`h-full transition-all duration-500 ${
-                  profile.totalScore >= 75
-                    ? 'bg-emerald-500'
-                    : profile.totalScore >= 40
-                    ? 'bg-amber-400'
-                    : 'bg-indigo-500'
-                }`}
+                className={`h-full transition-all duration-500 ${scoreColor}`}
                 style={{ width: `${profile.totalScore}%` }}
               />
             </div>
@@ -463,6 +582,161 @@ export function App() {
           )}
         </aside>
       </main>
+
+      {showSettings && (
+        <div
+          className="fixed inset-0 z-30 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setShowSettings(false);
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-title"
+            className="w-full max-w-lg rounded-2xl border border-slate-700 bg-slate-900 p-6 shadow-2xl"
+          >
+            <div className="mb-6 flex items-start justify-between gap-4">
+              <div>
+                <h2 id="settings-title" className="text-lg font-semibold text-white">
+                  Qualification settings
+                </h2>
+                <p className="mt-1 text-sm text-slate-400">
+                  Set your lead scoring cutoffs and sales handoff preferences.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSettings(false)}
+                aria-label="Close qualification settings"
+                autoFocus
+                className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-800 hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveSettings} className="space-y-5">
+              <div>
+                <label htmlFor="mql-threshold" className="mb-2 flex justify-between text-sm">
+                  <span className="font-medium text-slate-200">MQL score threshold</span>
+                  <span className="text-indigo-300">{settingsDraft.mqlThreshold} points</span>
+                </label>
+                <input
+                  id="mql-threshold"
+                  type="range"
+                  min="0"
+                  max={settingsDraft.sqlThreshold - 1}
+                  value={settingsDraft.mqlThreshold}
+                  onChange={(event) =>
+                    setSettingsDraft((current) => ({
+                      ...current,
+                      mqlThreshold: Number(event.target.value),
+                    }))
+                  }
+                  className="w-full accent-indigo-500"
+                />
+                <p className="mt-1 text-xs text-slate-500">
+                  Scores at or above this value are marked as marketing-qualified.
+                </p>
+              </div>
+
+              <div>
+                <label htmlFor="sql-threshold" className="mb-2 flex justify-between text-sm">
+                  <span className="font-medium text-slate-200">SQL score threshold</span>
+                  <span className="text-indigo-300">{settingsDraft.sqlThreshold} points</span>
+                </label>
+                <input
+                  id="sql-threshold"
+                  type="range"
+                  min={settingsDraft.mqlThreshold + 1}
+                  max="100"
+                  value={settingsDraft.sqlThreshold}
+                  onChange={(event) =>
+                    setSettingsDraft((current) => ({
+                      ...current,
+                      sqlThreshold: Number(event.target.value),
+                    }))
+                  }
+                  className="w-full accent-indigo-500"
+                />
+                <p className="mt-1 text-xs text-slate-500">
+                  Scores at or above this value are routed as sales-qualified leads.
+                </p>
+              </div>
+
+              <div>
+                <label htmlFor="minimum-budget" className="mb-2 block text-sm font-medium text-slate-200">
+                  Minimum monthly budget
+                </label>
+                <select
+                  id="minimum-budget"
+                  value={settingsDraft.minimumMonthlyBudget}
+                  onChange={(event) =>
+                    setSettingsDraft((current) => ({
+                      ...current,
+                      minimumMonthlyBudget: Number(event.target.value),
+                    }))
+                  }
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white focus:border-indigo-500 focus:outline-none"
+                >
+                  <option value={0}>No minimum</option>
+                  <option value={500}>$500 / month</option>
+                  <option value={1000}>$1,000 / month</option>
+                  <option value={2500}>$2,500 / month</option>
+                  <option value={5000}>$5,000 / month</option>
+                </select>
+                <p className="mt-1 text-xs text-slate-500">
+                  Leads below this budget receive a lower budget score.
+                </p>
+              </div>
+
+              <div>
+                <label htmlFor="sql-routing" className="mb-2 block text-sm font-medium text-slate-200">
+                  SQL handoff destination
+                </label>
+                <input
+                  id="sql-routing"
+                  type="text"
+                  required
+                  maxLength={80}
+                  value={settingsDraft.sqlRoutingDestination}
+                  onChange={(event) =>
+                    setSettingsDraft((current) => ({
+                      ...current,
+                      sqlRoutingDestination: event.target.value,
+                    }))
+                  }
+                  placeholder="e.g. Enterprise sales team"
+                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none"
+                />
+              </div>
+
+              {settingsError && (
+                <p role="alert" className="text-sm text-rose-300">
+                  {settingsError}
+                </p>
+              )}
+
+              <div className="flex justify-end gap-3 border-t border-slate-800 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowSettings(false)}
+                  className="rounded-lg border border-slate-700 px-4 py-2 text-sm font-medium text-slate-300 transition hover:bg-slate-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500"
+                >
+                  Save preferences
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

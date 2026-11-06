@@ -28,6 +28,13 @@ export interface LeadProfile {
   recommendedAction: string;
 }
 
+export interface QualificationSettings {
+  mqlThreshold: number;
+  sqlThreshold: number;
+  minimumMonthlyBudget: number;
+  sqlRoutingDestination: string;
+}
+
 export interface PresetScenario {
   label: string;
   description: string;

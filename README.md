@@ -19,6 +19,7 @@ The project helps sales teams qualify inbound website visitors using the **BANT 
 - **JSON Payload Inspector:** Shows structured lead information for review and integration.
 - **Demo Personas:** Test the qualification workflow using predefined visitor profiles.
 - **CRM Export:** Export structured lead data for use in external workflows.
+- **Qualification Settings:** Configure MQL and SQL score thresholds, a minimum monthly budget, and the SQL handoff destination. Preferences are saved in the current browser.
 
 ### Accessibility
 - Semantic HTML structure.
