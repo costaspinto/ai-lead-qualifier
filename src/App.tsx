@@ -1,4 +1,4 @@
-﻿import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Bot,
   Send,
@@ -304,7 +304,7 @@ export function App() {
             <div ref={chatEndRef} />
           </div>
 
-          <div className="px-4 py-2 bg-slate-900 border-t border-slate-800/80 flex items-center gap-1.5 overflow-x-auto">
+          <div className="px-4 py-2 bg-slate-900 border-t border-slate-800/80 flex flex-wrap items-center gap-2">
             {QUICK_REPLIES.map((chip, idx) => (
               <button
                 key={idx}
