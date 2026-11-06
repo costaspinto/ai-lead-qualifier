@@ -116,17 +116,15 @@ This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) f
 Frontend AI Engineering | FlyRank
 
 
-<!-- LIVE DEMO AND SCREENSHOT -->
-
 ## Live Demo
 
-Experience the deployed AI Lead Qualification Chat Widget:
+Try the deployed application:
 
 **[Launch AI Lead Qualifier](https://costaspinto.github.io/ai-lead-qualifier/)**
 
 ## Dashboard Preview
 
-The application provides a conversational lead qualification interface alongside a real-time BANT scoring dashboard.
+The application combines a conversational AI lead qualification interface with a real-time BANT scoring dashboard.
 
 ![AI Lead Qualifier Dashboard Preview](screenshots/dashboard-preview.png)
 
